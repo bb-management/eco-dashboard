@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 from transformers import pipeline
-
+NEWS ECO bonne journée mec
 # Tes clés API — remplace par tes vraies clés
 FINNHUB_API_KEY = "d1sua1pr01qhe5rc4vj0d1sua1pr01qhe5rc4vjg"
 MARKETAUX_API_KEY = "dOdEj91ZiMvnDMFVP9n2hwoz1rMTm7cy3OnjA0Xv"
