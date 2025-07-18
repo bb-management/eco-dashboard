@@ -11,8 +11,8 @@ from prophet import Prophet
 # ==========================
 # Config
 # ==========================
-FINNHUB_API_KEY = d1sua1pr01qhe5rc4vj0d1sua1pr01qhe5rc4vjg
-MARKETAUX_API_KEY = dOdEj91ZiMvnDMFVP9n2hwoz1rMTm7cy3OnjA0Xv
+FINNHUB_API_KEY = "d1sua1pr01qhe5rc4vj0d1sua1pr01qhe5rc4vjg"
+MARKETAUX_API_KEY = "dOdEj91ZiMvnDMFVP9n2hwoz1rMTm7cy3OnjA0Xv"
 
 # ==========================
 # 1. Charger modèles IA
