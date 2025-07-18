@@ -1,0 +1,8 @@
+streamlit
+requests
+pandas
+transformers
+torch
+sentencepiece
+plotly
+prophet
