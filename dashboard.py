@@ -1,95 +1,157 @@
 import streamlit as st
 import requests
-import pandas as pd
+import plotly.graph_objects as go
 from transformers import pipeline
-import os
 
-# --- CLÉS API ---
+# ---------------------
+# CONFIGURATION
+# ---------------------
+# --- 2. Clés API (exemple) ---
 FINNHUB_API_KEY = "d1sua1pr01qhe5rc4vj0d1sua1pr01qhe5rc4vjg"
-# Marketaux désactivé temporairement à cause de l'erreur 402
+MARKETAUX_API_KEY = "dOdEj91ZiMvnDMFVP9n2hwoz1rMTm7cy3OnjA0Xv"
+DEEPL_API_KEY = "ta_cle_deepl_ici"  # Remplace par ta vraie clé DeepL
 
-# --- Chargement des modèles IA avec cache ---
-@st.cache_resource
-def load_models():
-    summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
-    sentiment_analyzer = pipeline("sentiment-analysis")
-    # Traduction nécessite sentencepiece (installer en local)
-    try:
-        translator = pipeline("translation_en_to_fr", model="Helsinki-NLP/opus-mt-en-fr")
-    except Exception as e:
-        st.warning("Impossible de charger le modèle de traduction. Assurez-vous d'avoir installé 'sentencepiece'.")
-        translator = None
-    return summarizer, sentiment_analyzer, translator
-
-summarizer, sentiment_analyzer, translator = load_models()
-
-# --- Fonctions récupération news ---
-
+# --- 3. Fonctions pour récupérer les news ---
 def get_news_finnhub():
     url = f"https://finnhub.io/api/v1/news?category=general&token={FINNHUB_API_KEY}"
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        news = response.json()
-        return news
-    except Exception as e:
-        st.error(f"Erreur lors de la récupération des news Finnhub : {e}")
-        return []
+    response = requests.get(url)
+    articles = response.json()
+    return articles
 
-# Marketaux désactivé temporairement pour éviter l’erreur 402
 def get_news_marketaux():
-    return []
+    url = f"https://api.marketaux.com/v1/news/all?api_token={MARKETAUX_API_KEY}&language=en"
+    response = requests.get(url)
+    data = response.json()
+    return data.get('data', [])
 
-# --- Filtrer les articles importants économie ---
-def filter_important_news(news_list):
-    keywords = ["economic", "finance", "market", "inflation", "gdp", "unemployment", "interest rate", "stock", "trade", "bank"]
+# --- 4. Filtrage des articles importants économiquement ---
+keywords = ['inflation', 'growth', 'stock market', 'central bank', 'gdp', 'economy', 'finance', 'interest rate', 'recession']
+
+def filter_articles(articles):
     filtered = []
-    for article in news_list:
-        text = (article.get('headline') or "") + " " + (article.get('summary') or "") + " " + (article.get('category') or "")
-        if any(kw.lower() in text.lower() for kw in keywords):
+    for article in articles:
+        title = article.get('headline') or article.get('title') or ''
+        summary = article.get('summary') or article.get('description') or ''
+        text = (title + ' ' + summary).lower()
+        if any(keyword in text for keyword in keywords):
             filtered.append(article)
     return filtered
+FINNHUB_NEWS_URL = "https://finnhub.io/api/v1/news"
+FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"
+FINNHUB_INDEXES = {
+    "S&P 500": "^GSPC",
+    "Dow Jones": "^DJI",
+    "Nasdaq": "^IXIC",
+    "CAC 40": "^FCHI",
+    "DAX": "^GDAXI"
+}
 
-# --- Traduction ---
-def translate_text(text):
-    if translator is None:
-        return text
+# ---------------------
+# CHARGEMENT DES MODELS
+# ---------------------
+@st.cache_resource
+def load_models():
+    summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+    sentiment_analyzer = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+    return summarizer, sentiment_analyzer
+
+summarizer, sentiment_analyzer = load_models()
+
+# ---------------------
+# TRADUCTION LIBRETRANSLATE
+# ---------------------
+def translate_text(text, source_lang="en", target_lang="fr"):
     try:
-        result = translator(text, max_length=512)
-        return result[0]['translation_text']
-    except Exception as e:
+        url = "https://libretranslate.com/translate"
+        payload = {"q": text, "source": source_lang, "target": target_lang, "format": "text"}
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(url, json=payload, headers=headers)
+        return response.json().get("translatedText", text)
+    except:
         return text
 
-# --- Résumé et sentiment ---
-def analyze_text(text):
-    summary = summarizer(text, max_length=130, min_length=30, do_sample=False)[0]['summary_text']
-    sentiment = sentiment_analyzer(text)[0]
-    return summary, sentiment
+# ---------------------
+# ACTUALITÉS ÉCONOMIQUES (FINNHUB)
+# ---------------------
+def get_finnhub_news():
+    try:
+        params = {"category": "general", "token": FINNHUB_API_KEY}
+        response = requests.get(FINNHUB_NEWS_URL, params=params)
+        return response.json()
+    except:
+        return []
 
-# --- Streamlit app ---
-st.title("🌍 Dashboard Économie Mondiale")
-st.write("📰 Dernières actualités économiques")
+# ---------------------
+# QUOTES INDICES (FINNHUB)
+# ---------------------
+def get_index_price(symbol):
+    try:
+        params = {"symbol": symbol, "token": FINNHUB_API_KEY}
+        response = requests.get(FINNHUB_QUOTE_URL, params=params).json()
+        return response.get("c", None)
+    except:
+        return None
 
-news_finnhub = get_news_finnhub()
-news_marketaux = get_news_marketaux()
-all_news = news_finnhub + news_marketaux
+# ---------------------
+# INTERFACE STREAMLIT
+# ---------------------
+st.set_page_config(page_title="🌍 Dashboard Économie Mondiale", layout="wide")
+st.title("🌍 Dashboard Économie Mondiale - Version PRO")
 
-important_news = filter_important_news(all_news)
+# ---------------------
+# SECTION 1 : INDICES MONDIAUX
+# ---------------------
+st.header("📊 Indices Boursiers Mondiaux")
+cols = st.columns(len(FINNHUB_INDEXES))
 
-for article in important_news[:10]:
-    headline = article.get('headline') or article.get('title') or "Titre non disponible"
-    summary = article.get('summary') or article.get('description') or ""
-    url = article.get('url') or article.get('article_url') or ""
+for i, (name, symbol) in enumerate(FINNHUB_INDEXES.items()):
+    price = get_index_price(symbol)
+    if price:
+        cols[i].metric(label=name, value=f"{price:.2f} $")
+    else:
+        cols[i].write("Erreur")
 
-    # Traduction
-    headline_fr = translate_text(headline)
-    summary_fr = translate_text(summary)
+# ---------------------
+# SECTION 2 : ACTUALITÉS
+# ---------------------
+st.header("📰 Dernières actualités économiques")
+news = get_finnhub_news()
 
-    # Analyse IA sur résumé français
-    ia_summary, sentiment = analyze_text(summary_fr)
+if isinstance(news, list) and len(news) > 0:
+    for article in news[:5]:  # Limite à 5 articles
+        title = article.get("headline", "Sans titre")
+        summary = article.get("summary", "")
+        url = article.get("url", "#")
 
-    st.markdown(f"### {headline_fr}")
-    st.markdown(f"[Lien vers l'article]({url})")
-    st.markdown(f"**Résumé IA :** {ia_summary}")
-    st.markdown(f"**Sentiment :** {sentiment['label']} ({sentiment['score']*100:.2f}%)")
-    st.write("---")
+        translated_title = translate_text(title)
+        translated_summary = translate_text(summary)
+
+        st.subheader(f"🔹 {translated_title}")
+        st.write(translated_summary)
+        st.markdown(f"[Lire l'article complet]({url})")
+else:
+    st.warning("Impossible de récupérer les actualités. Vérifie ta clé Finnhub.")
+
+# ---------------------
+# SECTION 3 : ANALYSE DE TEXTE
+# ---------------------
+st.header("🧠 Analyse de texte économique")
+input_text = st.text_area("Colle un article ou un paragraphe en anglais :")
+
+if st.button("Analyser"):
+    if input_text.strip():
+        with st.spinner("Analyse en cours..."):
+            summary = summarizer(input_text, max_length=100, min_length=30, do_sample=False)[0]['summary_text']
+            sentiment = sentiment_analyzer(summary)[0]
+            translated_summary = translate_text(summary)
+
+        st.subheader("Résumé (EN) :")
+        st.write(summary)
+
+        st.subheader("Résumé traduit (FR) :")
+        st.write(translated_summary)
+
+        st.subheader("Sentiment :")
+        st.write(f"{sentiment['label']} (score : {round(sentiment['score'], 2)})")
+    else:
+        st.warning("Veuillez entrer un texte avant d'analyser.")
