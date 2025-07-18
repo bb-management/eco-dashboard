@@ -2,90 +2,94 @@ import streamlit as st
 import requests
 import pandas as pd
 from transformers import pipeline
+import os
 
-# Tes clés API — remplace par tes vraies clés
+# --- CLÉS API ---
 FINNHUB_API_KEY = "d1sua1pr01qhe5rc4vj0d1sua1pr01qhe5rc4vjg"
-MARKETAUX_API_KEY = "dOdEj91ZiMvnDMFVP9n2hwoz1rMTm7cy3OnjA0Xv"
+# Marketaux désactivé temporairement à cause de l'erreur 402
 
-@st.cache_resource(show_spinner=False)
+# --- Chargement des modèles IA avec cache ---
+@st.cache_resource
 def load_models():
     summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
     sentiment_analyzer = pipeline("sentiment-analysis")
+    # Traduction nécessite sentencepiece (installer en local)
     try:
-        translator = pipeline("translation_en_to_fr", model="Helsinki-NLP/opus-mt-en-fr", use_auth_token=False)
+        translator = pipeline("translation_en_to_fr", model="Helsinki-NLP/opus-mt-en-fr")
     except Exception as e:
-        st.warning(f"Impossible de charger le modèle de traduction : {e}")
+        st.warning("Impossible de charger le modèle de traduction. Assurez-vous d'avoir installé 'sentencepiece'.")
         translator = None
     return summarizer, sentiment_analyzer, translator
 
 summarizer, sentiment_analyzer, translator = load_models()
 
+# --- Fonctions récupération news ---
+
+def get_news_finnhub():
+    url = f"https://finnhub.io/api/v1/news?category=general&token={FINNHUB_API_KEY}"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        news = response.json()
+        return news
+    except Exception as e:
+        st.error(f"Erreur lors de la récupération des news Finnhub : {e}")
+        return []
+
+# Marketaux désactivé temporairement pour éviter l’erreur 402
+def get_news_marketaux():
+    return []
+
+# --- Filtrer les articles importants économie ---
+def filter_important_news(news_list):
+    keywords = ["economic", "finance", "market", "inflation", "gdp", "unemployment", "interest rate", "stock", "trade", "bank"]
+    filtered = []
+    for article in news_list:
+        text = (article.get('headline') or "") + " " + (article.get('summary') or "") + " " + (article.get('category') or "")
+        if any(kw.lower() in text.lower() for kw in keywords):
+            filtered.append(article)
+    return filtered
+
+# --- Traduction ---
 def translate_text(text):
     if translator is None:
         return text
     try:
-        if len(text) > 512:
-            text = text[:512]
-        result = translator(text)
+        result = translator(text, max_length=512)
         return result[0]['translation_text']
     except Exception as e:
-        st.warning(f"Erreur de traduction : {e}")
         return text
 
-def get_news_finnhub():
-    url = f"https://finnhub.io/api/v1/news?category=general&token={FINNHUB_API_KEY}"
-    response = requests.get(url)
-    response.raise_for_status()
-    data = response.json()
-    # Filtrer uniquement les news avec mots-clés économiques (exemple simple)
-    filtered = [item for item in data if any(k in item['headline'].lower() for k in ['économie', 'economic', 'marché', 'finance', 'bourse', 'inflation'])]
-    return filtered[:10]
+# --- Résumé et sentiment ---
+def analyze_text(text):
+    summary = summarizer(text, max_length=130, min_length=30, do_sample=False)[0]['summary_text']
+    sentiment = sentiment_analyzer(text)[0]
+    return summary, sentiment
 
-def get_news_marketaux():
-    url = f"https://api.marketaux.com/v1/news/all?api_token={MARKETAUX_API_KEY}&language=en"
-    response = requests.get(url)
-    response.raise_for_status()
-    data = response.json()
-    filtered = [item for item in data['data'] if any(k in item['title'].lower() for k in ['economy', 'market', 'finance', 'inflation', 'stock'])]
-    return filtered[:10]
+# --- Streamlit app ---
+st.title("🌍 Dashboard Économie Mondiale")
+st.write("📰 Dernières actualités économiques")
 
-def analyze_and_translate_articles(articles):
-    results = []
-    for art in articles:
-        title = art.get('headline') or art.get('title') or ''
-        summary = art.get('summary') or ''
-        url = art.get('url') or art.get('source_url') or ''
-        
-        # Résumé IA
-        summary_ai = summarizer(summary or title, max_length=100, min_length=30, do_sample=False)[0]['summary_text']
-        summary_fr = translate_text(summary_ai)
-        
-        # Analyse sentiment
-        sentiment = sentiment_analyzer(summary_ai)[0]
-        
-        results.append({
-            'title': translate_text(title),
-            'summary': summary_fr,
-            'sentiment': f"{sentiment['label']} ({sentiment['score']*100:.2f}%)",
-            'url': url
-        })
-    return results
+news_finnhub = get_news_finnhub()
+news_marketaux = get_news_marketaux()
+all_news = news_finnhub + news_marketaux
 
-st.title("🌍 Dashboard Économie Mondiale - PRO (Gratuit)")
+important_news = filter_important_news(all_news)
 
-st.subheader("📰 Dernières actualités économiques")
+for article in important_news[:10]:
+    headline = article.get('headline') or article.get('title') or "Titre non disponible"
+    summary = article.get('summary') or article.get('description') or ""
+    url = article.get('url') or article.get('article_url') or ""
 
-try:
-    news_finnhub = get_news_finnhub()
-    news_marketaux = get_news_marketaux()
-    all_news = news_finnhub + news_marketaux
-    news_data = analyze_and_translate_articles(all_news)
-    
-    for news in news_data:
-        st.markdown(f"### [{news['title']}]({news['url']})")
-        st.markdown(f"**Résumé IA:** {news['summary']}")
-        st.markdown(f"**Sentiment:** {news['sentiment']}")
-        st.markdown("---")
+    # Traduction
+    headline_fr = translate_text(headline)
+    summary_fr = translate_text(summary)
 
-except Exception as e:
-    st.error(f"Erreur lors de la récupération ou du traitement des données : {e}")
+    # Analyse IA sur résumé français
+    ia_summary, sentiment = analyze_text(summary_fr)
+
+    st.markdown(f"### {headline_fr}")
+    st.markdown(f"[Lien vers l'article]({url})")
+    st.markdown(f"**Résumé IA :** {ia_summary}")
+    st.markdown(f"**Sentiment :** {sentiment['label']} ({sentiment['score']*100:.2f}%)")
+    st.write("---")
