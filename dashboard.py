@@ -1,147 +1,115 @@
-# ======================================================
-# 🌍 Dashboard Économie Mondiale - Version PRO Gratuite
-# ======================================================
+import streamlit as st
 import requests
 import pandas as pd
-import streamlit as st
-import plotly.express as px
 from transformers import pipeline
-from prophet import Prophet
+import time
 
-# ==========================
-# Config
-# ==========================
+# Tes clés API — à remplacer par tes vraies clés
 FINNHUB_API_KEY = "d1sua1pr01qhe5rc4vj0d1sua1pr01qhe5rc4vjg"
 MARKETAUX_API_KEY = "dOdEj91ZiMvnDMFVP9n2hwoz1rMTm7cy3OnjA0Xv"
 
-# ==========================
-# 1. Charger modèles IA
-# ==========================
-@st.cache_resource
+# Liste de mots clés pour filtrer les articles économiques
+KEYWORDS_ECO = [
+    "économie", "marché", "inflation", "banque", "investissement", "bourse",
+    "croissance", "emploi", "taux", "finance", "industrie", "PIB", "chômage",
+    "récession", "export", "import", "dette", "trésor", "action", "dividende"
+]
+
+# Chargement des modèles avec cache pour ne pas recharger à chaque fois
+@st.cache_resource(show_spinner=False)
 def load_models():
     summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
     sentiment_analyzer = pipeline("sentiment-analysis")
-    return summarizer, sentiment_analyzer
+    translator = pipeline("translation", model="Helsinki-NLP/opus-mt-en-fr")
+    return summarizer, sentiment_analyzer, translator
 
-summarizer, sentiment_analyzer = load_models()
+summarizer, sentiment_analyzer, translator = load_models()
 
-def analyze_text(text):
-    # Résumé
-    summary = summarizer(text, max_length=60, min_length=20, do_sample=False)[0]['summary_text']
-    # Sentiment
-    sentiment = sentiment_analyzer(text)[0]
-    sentiment_score = f"{sentiment['label']} ({round(sentiment['score']*100, 2)}%)"
-    return summary, sentiment_score
+def translate_text(text):
+    # Limiter la longueur sinon erreur max_length
+    if len(text) > 512:
+        text = text[:512]
+    result = translator(text)
+    return result[0]['translation_text']
 
-# ==========================
-# 2. Récupération des news
-# ==========================
 def get_news_finnhub():
     url = f"https://finnhub.io/api/v1/news?category=general&token={FINNHUB_API_KEY}"
-    response = requests.get(url).json()
-    news_list = []
-    for n in response[:10]:
-        news_list.append({
-            "source": "Finnhub",
-            "headline": n.get("headline"),
-            "summary": n.get("summary"),
-            "url": n.get("url"),
-            "datetime": n.get("datetime")
-        })
-    return pd.DataFrame(news_list)
+    response = requests.get(url)
+    if response.status_code != 200:
+        st.error("Erreur lors de la récupération des news Finnhub")
+        return []
+    news = response.json()
+    return news
 
 def get_news_marketaux():
-    url = f"https://api.marketaux.com/v1/news/all?countries=us,fr,cn&api_token={MARKETAUX_API_KEY}"
-    response = requests.get(url).json()
-    news_list = []
-    for n in response["data"][:10]:
-        news_list.append({
-            "source": "Marketaux",
-            "headline": n.get("title"),
-            "summary": n.get("description"),
-            "url": n.get("url"),
-            "datetime": n.get("published_at")
-        })
-    return pd.DataFrame(news_list)
+    url = f"https://api.marketaux.com/v1/news/all?api_token={MARKETAUX_API_KEY}&language=en"
+    response = requests.get(url)
+    if response.status_code != 200:
+        st.error("Erreur lors de la récupération des news Marketaux")
+        return []
+    data = response.json()
+    return data.get("data", [])
 
-# ==========================
-# 3. Macro & Prévisions
-# ==========================
-def get_macro_indicators():
-    url = f"https://api.tradingeconomics.com/indicators?c=guest:guest&f=json"
-    response = requests.get(url).json()
-    macro_list = []
-    for i in response[:50]:
-        macro_list.append({
-            "country": i.get("Country"),
-            "indicator": i.get("Category"),
-            "latest_value": i.get("LatestValue"),
-            "unit": i.get("Unit"),
-            "forecast": i.get("Forecast")
-        })
-    return pd.DataFrame(macro_list)
+def filter_economic_news(news_list):
+    filtered = []
+    for news in news_list:
+        # Chercher mots clés dans titre ou description (en minuscule)
+        title = news.get("headline") or news.get("title") or ""
+        description = news.get("summary") or news.get("description") or ""
+        text_to_check = (title + " " + description).lower()
+        if any(keyword in text_to_check for keyword in KEYWORDS_ECO):
+            filtered.append(news)
+    return filtered
 
-# ==========================
-# 4. Prévisions IA avec Prophet
-# ==========================
-def forecast_indicator(df, country, indicator):
-    url = f"https://api.tradingeconomics.com/historical/country/{country}/indicator/{indicator}?c=guest:guest&f=json"
-    data = requests.get(url).json()
-    hist = pd.DataFrame(data)
-    hist = hist[['DateTime', 'Value']].rename(columns={"DateTime": "ds", "Value": "y"})
-    hist['ds'] = pd.to_datetime(hist['ds'])
+def analyze_sentiment(text):
+    # Le pipeline renvoie une liste [{'label':..., 'score':...}]
+    results = sentiment_analyzer(text)
+    labels = {"POSITIVE": "POSITIVE", "NEGATIVE": "NEGATIVE", "NEUTRAL": "NEUTRE"}
+    label = results[0]["label"]
+    score = results[0]["score"] * 100
+    return labels.get(label, label), score
 
-    if len(hist) < 5:
-        return None, None
+def main():
+    st.title("🌍 Dashboard Économie Mondiale - PRO (Gratuit)")
+    st.markdown("News + Indicateurs + Analyse IA + Graphiques + Prévisions")
 
-    model = Prophet()
-    model.fit(hist)
-    future = model.make_future_dataframe(periods=12, freq='M')
-    forecast = model.predict(future)
-    return hist, forecast
+    with st.spinner("Récupération des actualités..."):
+        news_finnhub = get_news_finnhub()
+        news_marketaux = get_news_marketaux()
 
-# ==========================
-# 5. Interface Streamlit
-# ==========================
-st.title("🌍 Dashboard Économie Mondiale - PRO (Gratuit)")
-st.write("News + Indicateurs + Analyse IA + Graphiques + Prévisions")
+    news_all = news_finnhub + news_marketaux
+    news_filtered = filter_economic_news(news_all)
 
-# Récupération des données
-with st.spinner("Chargement des données..."):
-    news_df = pd.concat([get_news_finnhub(), get_news_marketaux()], ignore_index=True)
-    macro_df = get_macro_indicators()
+    st.header("📰 Dernières actualités économiques filtrées")
 
-# --- FILTRES ---
-st.sidebar.header("Filtres")
-selected_country = st.sidebar.selectbox("Choisir un pays", sorted(macro_df['country'].dropna().unique()))
-selected_indicator = st.sidebar.selectbox("Choisir un indicateur", sorted(macro_df['indicator'].dropna().unique()))
+    if not news_filtered:
+        st.info("Aucune actualité économique récente trouvée.")
+        return
 
-# ---------------- NEWS ----------------
-st.subheader("📰 Dernières actualités économiques")
-for index, row in news_df.iterrows():
-    st.markdown(f"**{row['headline']}**")
-    st.write(f"*{row['summary']}*")
-    st.write(f"[Lien vers l'article]({row['url']})")
-    
-    if st.button(f"Analyser cette news", key=f"btn_{index}"):
-        summary, sentiment = analyze_text(row['summary'])
-        st.write(f"**Résumé IA :** {summary}")
-        st.write(f"**Sentiment :** {sentiment}")
+    for news in news_filtered[:10]:  # limite à 10 articles
+        title_en = news.get("headline") or news.get("title") or "Sans titre"
+        url = news.get("url") or news.get("link") or "#"
+        description_en = news.get("summary") or news.get("description") or ""
 
-# ---------------- INDICATEURS MACRO ----------------
-st.subheader(f"📊 Indicateurs Macro pour {selected_country}")
-country_data = macro_df[macro_df['country'] == selected_country]
-st.dataframe(country_data)
+        # Traduction titre et description
+        title_fr = translate_text(title_en)
+        description_fr = translate_text(description_en) if description_en else ""
 
-# ---------------- GRAPHIQUE ----------------
-fig = px.bar(country_data, x="indicator", y="latest_value", color="indicator", title=f"Valeurs Macro - {selected_country}")
-st.plotly_chart(fig)
+        # Résumé IA (en anglais avant traduction)
+        summary_en = summarizer(description_en, max_length=130, min_length=30, do_sample=False)[0]["summary_text"] if description_en else "Résumé non disponible"
+        summary_fr = translate_text(summary_en)
 
-# ---------------- PRÉVISION ----------------
-st.subheader(f"📈 Prévisions IA pour {selected_indicator} ({selected_country})")
-hist, forecast = forecast_indicator(macro_df, selected_country, selected_indicator)
-if hist is not None:
-    fig_forecast = px.line(forecast, x='ds', y='yhat', title=f"Prévision {selected_indicator} ({selected_country})")
-    st.plotly_chart(fig_forecast)
-else:
-    st.warning("Pas assez de données pour prévoir cet indicateur.")
+        # Analyse sentiment sur résumé anglais (plus fiable en anglais)
+        sentiment_label, sentiment_score = analyze_sentiment(summary_en)
+
+        # Affichage
+        st.markdown(f"### [{title_fr}]({url})")
+        st.markdown(f"**Résumé IA :** {summary_fr}")
+        st.markdown(f"**Sentiment :** {sentiment_label} ({sentiment_score:.2f}%)")
+        st.markdown("---")
+
+        # Petit délai pour éviter surcharge API modèles locaux
+        time.sleep(0.5)
+
+if __name__ == "__main__":
+    main()
