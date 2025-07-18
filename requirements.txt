@@ -4,3 +4,4 @@ pandas
 numpy
 transformers
 torch
+prophet
