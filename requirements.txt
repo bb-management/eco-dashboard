@@ -1,7 +1,5 @@
 streamlit
 plotly
-pandas
-numpy
-transformers
-torch
 prophet
+cmdstanpy
+transformers
