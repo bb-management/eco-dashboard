@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 from transformers import pipeline
-NEWS ECO bonne journée mec
+
 # Tes clés API — remplace par tes vraies clés
 FINNHUB_API_KEY = "d1sua1pr01qhe5rc4vj0d1sua1pr01qhe5rc4vjg"
 MARKETAUX_API_KEY = "dOdEj91ZiMvnDMFVP9n2hwoz1rMTm7cy3OnjA0Xv"
@@ -66,4 +66,26 @@ def analyze_and_translate_articles(articles):
         results.append({
             'title': translate_text(title),
             'summary': summary_fr,
-            'sentiment': f"{sentiment['label']} ({sentime
+            'sentiment': f"{sentiment['label']} ({sentiment['score']*100:.2f}%)",
+            'url': url
+        })
+    return results
+
+st.title("🌍 Dashboard Économie Mondiale - PRO (Gratuit)")
+
+st.subheader("📰 Dernières actualités économiques")
+
+try:
+    news_finnhub = get_news_finnhub()
+    news_marketaux = get_news_marketaux()
+    all_news = news_finnhub + news_marketaux
+    news_data = analyze_and_translate_articles(all_news)
+    
+    for news in news_data:
+        st.markdown(f"### [{news['title']}]({news['url']})")
+        st.markdown(f"**Résumé IA:** {news['summary']}")
+        st.markdown(f"**Sentiment:** {news['sentiment']}")
+        st.markdown("---")
+
+except Exception as e:
+    st.error(f"Erreur lors de la récupération ou du traitement des données : {e}")
